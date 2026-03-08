@@ -3,8 +3,8 @@ import requests
 import os
 from datetime import datetime, timezone, timedelta
 
-INPUT_FILE = r"C:\Users\phy96\Desktop\my-capstone-project\data\location_with_grid.csv"
-OUTPUT_FILE = r"C:\Users\phy96\Desktop\my-capstone-project\data\log_openmeteo.csv"
+INPUT_FILE = r"location_with_grid.csv"
+OUTPUT_FILE = r"log_openmeteo.csv"
 
 KST = timezone(timedelta(hours=9))
 now = datetime.now(KST)
