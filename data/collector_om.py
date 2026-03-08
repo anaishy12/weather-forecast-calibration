@@ -11,10 +11,8 @@ now = datetime.now(KST)
 BASE_DATE = now.strftime('%Y%m%d')
 BASE_TIME = '0800' if now.hour < 12 else '1400'
 
-# 데이터가 수집/저장된 현재 시각 (KST 기준) 추가
 CURRENT_TIME_KST = now.strftime('%Y-%m-%d %H:%M:%S')
 
-# 수정포인트 1: ecmwf_ifs04가 최근 Open-Meteo에서 ecmwf_ifs025로 업데이트됨에 따라 모델명 변경
 MODELS_TO_FETCH = ['ecmwf_ifs025', 'gfs_seamless', 'ukmo_seamless', 'gem_seamless', 'kma_seamless']
 
 def main():
@@ -25,56 +23,58 @@ def main():
     locations = pd.read_csv(INPUT_FILE)
     om_data = []
 
-    # API에 요청할 모델 리스트를 문자열로 변환 (URL 파라미터용)
-    models_str = ",".join(MODELS_TO_FETCH)
-
     for _, row in locations.iterrows():
         rgn = row.get('Region_en', 'Unknown')
         city = row.get('City_Gu_en', 'Unknown')
         lat, lon = row['lat'], row['lon']
         
-        print(f"🔄 Open-Meteo 수집 중: {city}")
+        print(f"🔄 Open-Meteo 수집 중: {city} (Lat: {lat}, Lon: {lon})")
         
-        try:
-            url = (f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
-                   f"&hourly=temperature_2m,precipitation_probability,precipitation"
-                   f"&models={models_str}"
-                   f"&timezone=Asia%2FSeoul")
-            
-            # response.raise_for_status()를 추가하여 HTTP 에러(예: 400, 500) 발생 시 빠르게 예외 처리
-            response = requests.get(url)
-            response.raise_for_status() 
-            res = response.json()
-            
-            if 'hourly' in res:
-                hourly = res['hourly']
-                times = hourly['time']
+        # 모델별로 개별 요청 (하나의 모델 에러가 다른 모델 수집에 영향을 주지 않도록 격리)
+        for model in MODELS_TO_FETCH:
+            try:
+                url = (f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+                       f"&hourly=temperature_2m,precipitation_probability,precipitation"
+                       f"&models={model}"
+                       f"&timezone=Asia%2FSeoul")
                 
-                # 수정포인트 2: API 응답에 특정 모델 데이터가 누락되었을 때 발생하는 IndexError 방지
-                # 만약 키가 없다면 [None, None, ...] 형태의 빈 리스트를 반환하도록 안전하게 처리
-                model_data = {}
-                for model in MODELS_TO_FETCH:
-                    model_data[model] = {
-                        'pop': hourly.get(f'precipitation_probability_{model}', [None] * len(times)),
-                        'pcp': hourly.get(f'precipitation_{model}', [None] * len(times)),
-                        'temp': hourly.get(f'temperature_2m_{model}', [None] * len(times))
-                    }
+                response = requests.get(url)
                 
-                now_str = now.strftime('%Y-%m-%dT%H:00')
-                now_local = now.replace(tzinfo=None) # 시간 비교를 위해 타임존 정보 제거
-                
-                for i, target_time in enumerate(times):
-                    # 현재 시간 이전 데이터는 스킵
-                    if target_time < now_str: 
-                        continue
-                        
-                    # 현재 시간 기준 120시간(5일)을 초과하는 데이터는 스킵 (정확한 시간 계산)
-                    target_dt = datetime.strptime(target_time, '%Y-%m-%dT%H:%M')
-                    if target_dt > now_local + timedelta(hours=120):
-                        break
+                # 강수확률 미지원 등 400 에러 시, 강수확률을 빼고 재요청
+                if response.status_code == 400:
+                    url_fallback = (f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+                                    f"&hourly=temperature_2m,precipitation"
+                                    f"&models={model}"
+                                    f"&timezone=Asia%2FSeoul")
+                    response = requests.get(url_fallback)
 
-                    for model in MODELS_TO_FETCH:
-                        # 수정포인트 2: Provider 이름을 깔끔하게 앞단어만 추출 (ECMWF, GFS, KMA 등)
+                if response.status_code != 200:
+                    print(f"   ⚠️ API 에러 [{model}]: {response.text}")
+                    continue # 해당 모델만 스킵하고 다음 모델 진행
+                    
+                res = response.json()
+                
+                if 'hourly' in res:
+                    hourly = res['hourly']
+                    times = hourly['time']
+                    
+                    # 데이터 매핑 (없으면 빈칸 처리)
+                    pop_data = hourly.get(f'precipitation_probability_{model}', [None] * len(times))
+                    pcp_data = hourly.get(f'precipitation_{model}', [None] * len(times))
+                    temp_data = hourly.get(f'temperature_2m_{model}', [None] * len(times))
+                    
+                    now_str = now.strftime('%Y-%m-%dT%H:00')
+                    now_local = now.replace(tzinfo=None)
+                    
+                    added_count = 0
+                    for i, target_time in enumerate(times):
+                        if target_time < now_str: 
+                            continue
+                            
+                        target_dt = datetime.strptime(target_time, '%Y-%m-%dT%H:%M')
+                        if target_dt > now_local + timedelta(hours=120):
+                            break
+
                         provider_name = model.split('_')[0].upper()
                         
                         om_data.append({
@@ -83,20 +83,29 @@ def main():
                             'Rgn_en': rgn, 
                             'City_Gu_en': city,
                             'fcst_time': target_time.replace('T', ' ') + ':00',
-                            'POP': model_data[model]['pop'][i],
-                            'PCP': model_data[model]['pcp'][i],
-                            'TEMP': model_data[model]['temp'][i],
-                            'updated_at': CURRENT_TIME_KST  # KST 기준 현재 시각 저장
+                            'POP': pop_data[i],
+                            'PCP': pcp_data[i],
+                            'TEMP': temp_data[i],
+                            'updated_at': CURRENT_TIME_KST
                         })
-        except Exception as e:
-            print(f"⚠️ 에러 발생 ({city}): {e}")
+                        added_count += 1
+                        
+                    # print(f"   ✅ [{model}] {added_count}개의 시간대 데이터 추가됨")
+                    
+            except Exception as e:
+                print(f"   ⚠️ 알 수 없는 에러 발생 [{model}]: {e}")
 
+    # DataFrame 생성 및 저장
     df = pd.DataFrame(om_data)
+    
     if not df.empty:
-        df.to_csv(OUTPUT_FILE, mode='a', header=not os.path.exists(OUTPUT_FILE), index=False, encoding='utf-8-sig')
-        print(f"✅ Open-Meteo 데이터 저장 완료! -> {OUTPUT_FILE}")
+        # 파일이 비어있는(0바이트) 상태라면 새로 헤더를 써주기 위해 exists 체크 후 파일 크기까지 확인
+        file_exists_and_not_empty = os.path.exists(OUTPUT_FILE) and os.path.getsize(OUTPUT_FILE) > 0
+        
+        df.to_csv(OUTPUT_FILE, mode='a', header=not file_exists_and_not_empty, index=False, encoding='utf-8-sig')
+        print(f"✅ Open-Meteo 데이터 총 {len(df)}건 저장 완료! -> {OUTPUT_FILE}")
     else:
-        print("⚠️ 수집되어 저장할 데이터가 없습니다.")
+        print("⚠️ 수집되어 저장할 데이터가 0건입니다. 터미널의 에러 로그를 확인해주세요.")
 
 if __name__ == "__main__":
     main()
