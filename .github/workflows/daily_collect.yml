@@ -25,7 +25,7 @@ jobs:
         pip install pandas requests  # 스크립트에 필요한 라이브러리 추가
 
     - name: Run collector script
-      run: python collector_om.py
+      run: python data/collector_om.py
 
     - name: Commit and Push changes
     # 데이터가 업데이트되었을 때만 커밋하도록 설정
