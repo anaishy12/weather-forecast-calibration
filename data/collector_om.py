@@ -4,12 +4,15 @@ import os
 from datetime import datetime, timezone, timedelta
 
 INPUT_FILE = r"location_with_grid.csv"
-OUTPUT_FILE = r"log_openmeteo.csv"
+OUTPUT_FILE = r"log_openmeteo_raw.csv"
 
 KST = timezone(timedelta(hours=9))
 now = datetime.now(KST)
 BASE_DATE = now.strftime('%Y%m%d')
 BASE_TIME = '0800' if now.hour < 12 else '1400'
+
+# 데이터가 수집/저장된 현재 시각 (KST 기준) 추가
+CURRENT_TIME_KST = now.strftime('%Y-%m-%d %H:%M:%S')
 
 # 수정포인트 1: ecmwf_ifs04가 최근 Open-Meteo에서 ecmwf_ifs025로 업데이트됨에 따라 모델명 변경
 MODELS_TO_FETCH = ['ecmwf_ifs025', 'gfs_seamless', 'ukmo_seamless', 'gem_seamless', 'kma_seamless']
@@ -82,7 +85,8 @@ def main():
                             'fcst_time': target_time.replace('T', ' ') + ':00',
                             'POP': model_data[model]['pop'][i],
                             'PCP': model_data[model]['pcp'][i],
-                            'TEMP': model_data[model]['temp'][i]
+                            'TEMP': model_data[model]['temp'][i],
+                            'updated_at': CURRENT_TIME_KST  # KST 기준 현재 시각 저장
                         })
         except Exception as e:
             print(f"⚠️ 에러 발생 ({city}): {e}")
