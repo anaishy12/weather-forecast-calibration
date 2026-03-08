@@ -3,8 +3,12 @@ import requests
 import os
 from datetime import datetime, timezone, timedelta
 
-INPUT_FILE = r"location_with_grid.csv"
-OUTPUT_FILE = r"log_openmeteo_raw.csv"
+# 현재 스크립트 파일이 위치한 폴더의 절대 경로를 가져옵니다.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 스크립트가 있는 폴더(data)를 기준으로 입출력 파일 경로를 고정합니다.
+INPUT_FILE = os.path.join(SCRIPT_DIR, "location_with_grid.csv")
+OUTPUT_FILE = os.path.join(SCRIPT_DIR, "log_openmeteo_raw.csv")
 
 KST = timezone(timedelta(hours=9))
 now = datetime.now(KST)
